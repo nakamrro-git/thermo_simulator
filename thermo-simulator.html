@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>気体の状態変化シミュレーター</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* 配置: 左に入力レール、右に結果（エネルギー3項目 → 状態表 → ピストン・p-V・T-V・式）。狭い画面では縦積み。 */
+:root{
+  --bg:#eceff3; --grid:rgba(30,70,100,.06); --panel:#f9fafc; --field:#ffffff;
+  --fg:#14202e; --muted:#5b6978; --line:#cdd5de;
+  --accent:#14607f; --accent-ink:#ffffff; --accent-tint:rgba(20,96,127,.09);
+  --s2:#b4305f;
+  --hot:#e0612b; --cold:#3a86d8; --on-band:#ffffff;
+  --ok:#1f7a4d; --bad:#b3261e; --warn:#8a5a00;
+  --font-body:'Zen Kaku Gothic New','Hiragino Kaku Gothic ProN','Yu Gothic',Meiryo,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e141b; --grid:rgba(150,190,220,.05); --panel:#151d26; --field:#0f161d;
+    --fg:#e3eaf1; --muted:#8fa0b1; --line:#2a3745;
+    --accent:#5fc3e4; --accent-ink:#06222c; --accent-tint:rgba(95,195,228,.13);
+    --s2:#f27aa5; --hot:#ff8c57; --cold:#6aa9f2; --on-band:#1a1208;
+    --ok:#5fd39a; --bad:#ff8a80; --warn:#f0c36a; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e141b; --grid:rgba(150,190,220,.05); --panel:#151d26; --field:#0f161d;
+  --fg:#e3eaf1; --muted:#8fa0b1; --line:#2a3745;
+  --accent:#5fc3e4; --accent-ink:#06222c; --accent-tint:rgba(95,195,228,.13);
+  --s2:#f27aa5; --hot:#ff8c57; --cold:#6aa9f2; --on-band:#1a1208;
+  --ok:#5fd39a; --bad:#ff8a80; --warn:#f0c36a; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background-color:var(--bg);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px;
+  color:var(--fg); font-family:var(--font-body); font-size:15px; line-height:1.65;
+}
+.wrap{max-width:1280px;margin:0 auto;padding-block:28px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.head{margin-bottom:22px;max-width:70ch}
+h1{margin:0 0 6px;font-size:clamp(22px,4vw,30px);line-height:1.3;font-weight:700;text-wrap:balance;letter-spacing:.01em}
+.head p{margin:0;color:var(--muted)}
+h2{margin:0 0 12px;font-size:14px;font-weight:700;letter-spacing:.04em}
+sub,sup{line-height:0}
+.layout{display:grid;grid-template-columns:minmax(290px,350px) minmax(0,1fr);gap:20px;align-items:start}
+.rail,.res{display:flex;flex-direction:column;gap:16px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+
+/* form */
+fieldset{border:0;margin:0 0 16px;padding:0;min-width:0}
+legend{padding:0;margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+.opt{display:block;position:relative;margin-bottom:6px}
+.opt input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+.opt .box{display:block;border:1px solid var(--line);border-radius:6px;padding:8px 12px;background:var(--field);line-height:1.4}
+.opt .box b{display:block;font-weight:700}
+.opt .box small{display:block;color:var(--muted);font-size:12px}
+.opt input:checked + .box{border-color:var(--accent);background:var(--accent-tint)}
+.opt input:focus-visible + .box{outline:2px solid var(--accent);outline-offset:2px}
+.procs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.procs .opt{margin:0}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:13px;margin-bottom:4px}
+.inp{display:flex;align-items:center;gap:8px}
+input[type=number],select{
+  width:100%;height:38px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--fg);
+  padding:0 10px;font:500 15px var(--font-mono);min-width:0;
+}
+select{font-family:var(--font-body)}
+input[type=number]:disabled{opacity:.6;background:transparent}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.u{flex:none;min-width:5.2em;color:var(--muted);font-size:13px}
+.extra{border-top:1px dashed var(--line);padding-top:12px;margin-top:4px}
+.btn{height:40px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:700 14px var(--font-body);padding:0 18px;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn.full{width:100%}
+
+/* checks */
+#checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+#checks li{display:flex;gap:10px;align-items:baseline;font-size:13px;line-height:1.5}
+.pill{flex:none;min-width:3.4em;text-align:center;font-size:11px;font-weight:700;border:1px solid currentColor;border-radius:4px;padding:0 4px;letter-spacing:.04em}
+.pill.ok{color:var(--ok)} .pill.miss{color:var(--bad)} .pill.warn{color:var(--warn)} .pill.info{color:var(--muted)}
+
+/* results */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;min-width:0}
+.tile h2{font-size:12px;color:var(--muted);margin-bottom:6px}
+.val{margin:0;font:500 clamp(22px,3vw,30px)/1.2 var(--font-mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.cap{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.law{margin:0;font:400 13px/1.6 var(--font-mono);color:var(--muted);overflow-wrap:anywhere}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+thead th{font-size:12px;color:var(--muted);font-weight:700}
+tbody th{text-align:left;font-weight:500}
+tbody th span{margin-left:8px;font-size:12px;color:var(--muted)}
+td{font-family:var(--font-mono)}
+td.fin{font-weight:500;background:var(--accent-tint)}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
+.figs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.fig{width:100%}
+canvas{display:block;width:100%}
+.note{margin:10px 0 0;font-size:13px;color:var(--muted)}
+.ctl{display:flex;gap:12px;align-items:center;margin-top:12px}
+.ctl .btn{flex:none;min-width:7em}
+.ctl input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
+.live{margin:8px 0 0;font:400 13px/1.6 var(--font-mono);color:var(--muted)}
+.live b{color:var(--fg);font-weight:500}
+dl{margin:0;display:grid;gap:10px}
+dl div{display:grid;grid-template-columns:3.4em minmax(0,1fr);gap:2px 10px;font-size:13px}
+dt{font-weight:700}
+dd{margin:0;min-width:0}
+dd .f{display:block;color:var(--muted)}
+dd .v{display:block;font-family:var(--font-mono);overflow-wrap:anywhere}
+
+@media (max-width:980px){
+  .layout{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:720px){
+  .figs{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important}}
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <h1>気体の状態変化シミュレーター</h1>
+    <p>理想気体を定積・定圧・等温・断熱のいずれかで変化させ、内部エネルギーの変化量 ΔU、気体が外部にした仕事 W、吸収した熱量 Q と最終状態を求めます。</p>
+  </header>
+
+  <div class="layout">
+    <div class="rail">
+      <form id="f" class="card" novalidate>
+        <fieldset>
+          <legend>気体の種類</legend>
+          <label class="opt"><input type="radio" name="gas" value="mono" checked><span class="box"><b>単原子分子理想気体</b><small>He・Ne・Ar など　C<sub>V</sub> = 3R/2</small></span></label>
+          <label class="opt"><input type="radio" name="gas" value="di"><span class="box"><b>二原子分子理想気体</b><small>N₂・O₂・空気 など　C<sub>V</sub> = 5R/2</small></span></label>
+        </fieldset>
+
+        <fieldset>
+          <legend>初期状態</legend>
+          <div class="field"><label for="n">物質量 n</label>
+            <div class="inp"><input id="n" type="number" inputmode="decimal" step="any" min="0" value="1"><span class="u">mol</span></div></div>
+          <div class="field"><label for="p1">初期圧力 p₁</label>
+            <div class="inp"><input id="p1" type="number" inputmode="decimal" step="any" min="0" value="1.00"><span class="u">×10⁵ Pa</span></div></div>
+          <div class="field"><label for="unit">温度の単位</label>
+            <div class="inp"><select id="unit"><option value="K" selected>K（絶対温度）</option><option value="C">°C（セルシウス温度）</option></select></div></div>
+          <div class="field"><label for="T1">初期温度 T₁</label>
+            <div class="inp"><input id="T1" type="number" inputmode="decimal" step="any" value="300"><span class="u uT">K</span></div></div>
+          <div class="field" style="margin-bottom:0"><label for="T2">最終温度 T₂</label>
+            <div class="inp"><input id="T2" type="number" inputmode="decimal" step="any" value="450"><span class="u uT">K</span></div></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>変化の過程</legend>
+          <div class="procs">
+            <label class="opt"><input type="radio" name="proc" value="iso-v"><span class="box"><b>定積変化</b><small>V 一定</small></span></label>
+            <label class="opt"><input type="radio" name="proc" value="iso-p" checked><span class="box"><b>定圧変化</b><small>p 一定</small></span></label>
+            <label class="opt"><input type="radio" name="proc" value="iso-t"><span class="box"><b>等温変化</b><small>T 一定</small></span></label>
+            <label class="opt"><input type="radio" name="proc" value="adi"><span class="box"><b>断熱変化</b><small>Q = 0</small></span></label>
+          </div>
+          <div id="extra" class="extra" hidden>
+            <div class="field"><label for="xmode">等温変化に必要な追加の条件</label>
+              <div class="inp"><select id="xmode"><option value="V" selected>最終体積 V₂ を指定</option><option value="p">最終圧力 p₂ を指定</option></select></div></div>
+            <div class="field" style="margin-bottom:0"><label for="xval" id="xlabel">最終体積 V₂</label>
+              <div class="inp"><input id="xval" type="number" inputmode="decimal" step="any" min="0" placeholder="例: 50"><span class="u" id="xunit">L</span></div></div>
+          </div>
+        </fieldset>
+
+        <button class="btn full" type="submit">計算して再生</button>
+      </form>
+
+      <section class="card" aria-live="polite">
+        <h2>入力チェック</h2>
+        <ul id="checks"></ul>
+      </section>
+    </div>
+
+    <main class="res">
+      <section class="tiles">
+        <article class="tile"><h2>内部エネルギーの変化量 ΔU</h2><p class="val" id="vU">—</p><p class="cap" id="cU"></p></article>
+        <article class="tile"><h2>気体が外部にした仕事 W</h2><p class="val" id="vW">—</p><p class="cap" id="cW"></p></article>
+        <article class="tile"><h2>吸収した熱量 Q</h2><p class="val" id="vQ">—</p><p class="cap" id="cQ"></p></article>
+      </section>
+      <p class="law" id="law"></p>
+
+      <section class="card">
+        <h2>最終的な圧力・体積・温度</h2>
+        <div class="scroll"><table id="state"></table></div>
+      </section>
+
+      <div class="figs">
+        <section class="card">
+          <h2>ピストンの動き</h2>
+          <div class="fig"><canvas id="cvP" role="img" aria-label="ピストンとシリンダーのアニメーション"></canvas></div>
+          <p class="note" id="pnote"></p>
+          <div class="ctl">
+            <button id="play" type="button" class="btn ghost">再生</button>
+            <input id="seek" type="range" min="0" max="1000" value="1000" aria-label="変化の進み具合">
+          </div>
+          <p class="live" id="live"></p>
+        </section>
+        <section class="card">
+          <h2>p–V 図</h2>
+          <div class="fig"><canvas id="cvPV" role="img" aria-label="p-V図"></canvas></div>
+        </section>
+        <section class="card">
+          <h2>V–T 図</h2>
+          <div class="fig"><canvas id="cvTV" role="img" aria-label="V-T図"></canvas></div>
+        </section>
+        <section class="card">
+          <h2>使った式</h2>
+          <dl id="eq"></dl>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var R = 8.314462618;
+var $ = function(id){ return document.getElementById(id); };
+var FM = '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace';
+var FB = '"Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif';
+
+//<solve>
+function sig(x){
+  if(x === 0 || !isFinite(x)) return String(x === 0 ? 0 : x);
+  return Number(x.toPrecision(4)).toLocaleString('ja-JP', {maximumFractionDigits: 12});
+}
+function fJ(x){
+  if(x === 0) return '0 J';
+  var s = x > 0 ? '+' : '−', a = Math.abs(x);
+  return s + (a >= 1e5 ? sig(a / 1000) + ' kJ' : sig(a) + ' J');
+}
+function solve(i){
+  var items = [], ok = true;
+  function add(s, t){ items.push({s: s, t: t}); if(s === 'miss') ok = false; }
+  function pos(x){ return isFinite(x) && x > 0; }
+  var isoT = i.proc === 'iso-t';
+
+  pos(i.n) ? add('ok', '物質量 n = ' + sig(i.n) + ' mol') : add('miss', '不足: 物質量 n を 0 より大きい値で入力してください');
+  pos(i.p1) ? add('ok', '初期圧力 p₁ = ' + sig(i.p1 / 1e5) + ' ×10⁵ Pa') : add('miss', '不足: 初期圧力 p₁ を 0 より大きい値で入力してください');
+  pos(i.T1) ? add('ok', '初期温度 T₁ = ' + sig(i.T1) + ' K') : add('miss', '不足: 初期温度 T₁ が未入力、または絶対温度で 0 K 以下です');
+  if(isoT){
+    add('info', '等温変化では T₂ = T₁ とするため、最終温度は入力不要です');
+    if(pos(i.xval)){
+      add('ok', i.xmode === 'V' ? '最終体積 V₂ = ' + sig(i.xval) + ' L' : '最終圧力 p₂ = ' + sig(i.xval) + ' ×10⁵ Pa');
+    } else {
+      add('miss', '不足: 等温変化は温度が変わらないため、最終体積 V₂ か最終圧力 p₂ のどちらか一方が必要です');
+    }
+  } else {
+    pos(i.T2) ? add('ok', '最終温度 T₂ = ' + sig(i.T2) + ' K') : add('miss', '不足: 最終温度 T₂ が未入力、または絶対温度で 0 K 以下です');
+    if(pos(i.T1) && pos(i.T2) && i.T1 === i.T2) add('warn', 'T₁ と T₂ が同じなので、状態は変化しません');
+  }
+  if(!ok) return {items: items, res: null};
+
+  var Cv = (i.gas === 'mono' ? 1.5 : 2.5) * R, Cp = Cv + R, g = Cp / Cv;
+  var n = i.n, p1 = i.p1, T1 = i.T1, T2 = isoT ? i.T1 : i.T2;
+  var V1 = n * R * T1 / p1, V2, p2;
+  if(i.proc === 'iso-v'){ V2 = V1; p2 = p1 * T2 / T1; }
+  else if(i.proc === 'iso-p'){ p2 = p1; V2 = n * R * T2 / p1; }
+  else if(i.proc === 'iso-t'){
+    if(i.xmode === 'V'){ V2 = i.xval / 1000; p2 = n * R * T1 / V2; }
+    else { p2 = i.xval * 1e5; V2 = n * R * T1 / p2; }
+    if(V2 === V1) add('warn', '最終状態が初期状態と同じなので、状態は変化しません');
+  }
+  else { V2 = V1 * Math.pow(T1 / T2, 1 / (g - 1)); p2 = n * R * T2 / V2; }
+  add('info', 'V₁ = nRT₁/p₁ = ' + sig(V1 * 1000) + ' L は自動で決まるため、入力不要です');
+
+  var dU = n * Cv * (T2 - T1), W, Q;
+  if(i.proc === 'iso-v'){ W = 0; Q = dU; }
+  else if(i.proc === 'iso-p'){ W = p1 * (V2 - V1); Q = n * Cp * (T2 - T1); }
+  else if(i.proc === 'iso-t'){ W = n * R * T1 * Math.log(V2 / V1); Q = W; }
+  else { Q = 0; W = -dU; }
+  dU = dU + 0; W = W + 0; Q = Q + 0;
+
+  function at(t){
+    var T, V, p;
+    if(i.proc === 'iso-v'){ T = T1 + (T2 - T1) * t; V = V1; p = n * R * T / V; }
+    else if(i.proc === 'iso-p'){ T = T1 + (T2 - T1) * t; p = p1; V = n * R * T / p; }
+    else if(i.proc === 'iso-t'){ T = T1; V = V1 * Math.pow(V2 / V1, t); p = n * R * T / V; }
+    else { T = T1 + (T2 - T1) * t; V = V1 * Math.pow(T1 / T, 1 / (g - 1)); p = n * R * T / V; }
+    return {V: V, p: p, T: T};
+  }
+  var N = 160, pts = {V: [], p: [], T: []}, Vmax = 0, Thi = -Infinity, Tlo = Infinity;
+  for(var k = 0; k <= N; k++){
+    var a = at(k / N);
+    pts.V.push(a.V * 1000); pts.p.push(a.p / 1e5); pts.T.push(a.T);
+    if(a.V > Vmax) Vmax = a.V;
+    if(a.T > Thi) Thi = a.T;
+    if(a.T < Tlo) Tlo = a.T;
+  }
+  return {items: items, res: {
+    gas: i.gas, proc: i.proc, n: n, Cv: Cv, Cp: Cp, g: g,
+    p1: p1, V1: V1, T1: T1, p2: p2, V2: V2, T2: T2,
+    dU: dU, W: W, Q: Q, at: at, pts: pts, Vmax: Vmax, Thi: Thi, Tlo: Tlo
+  }};
+}
+//</solve>
+
+/* ---------- state ---------- */
+var S = {
+  res: null, t: 1, playing: false, dirty: true,
+  reduced: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  parts: [], lastT2: '450'
+};
+for(var q = 0; q < 36; q++){
+  var ang = Math.random() * 6.2832;
+  S.parts.push({x: Math.random(), y: Math.random(), vx: Math.cos(ang), vy: Math.sin(ang)});
+}
+var NOTES = {
+  'iso-v': 'ピストンをストッパーで固定し、体積を一定に保ったまま加熱（冷却）します。',
+  'iso-p': 'ピストン上のおもりで圧力を一定に保ちます。加熱すると膨張し、冷却すると収縮します。',
+  'iso-t': '恒温槽で温度を一定に保ち、ゆっくり動かします。膨張では吸収した熱がそのまま仕事になります。',
+  'adi':   '断熱材で囲み、熱の出入りをなくします。膨張すると温度が下がり、圧縮すると上がります。'
+};
+
+/* ---------- input ---------- */
+function num(id){ var s = $(id).value.trim(); return s === '' ? NaN : Number(s); }
+function radio(name){ return document.querySelector('input[name="' + name + '"]:checked').value; }
+function readInput(){
+  var c = $('unit').value === 'C', proc = radio('proc');
+  var T1 = num('T1'), T2 = num('T2');
+  if(c){ T1 += 273.15; T2 += 273.15; }
+  return {gas: radio('gas'), n: num('n'), p1: num('p1') * 1e5, T1: T1, T2: T2, proc: proc,
+          xmode: $('xmode').value, xval: num('xval')};
+}
+function syncUI(){
+  var iso = radio('proc') === 'iso-t';
+  $('extra').hidden = !iso;
+  var t2 = $('T2');
+  if(iso && !t2.disabled){ S.lastT2 = t2.value; }
+  t2.disabled = iso;
+  if(iso){ t2.value = $('T1').value; } else if(t2.disabled === false && S.lastT2 !== undefined && t2.dataset.was === '1'){ t2.value = S.lastT2; }
+  t2.dataset.was = iso ? '1' : '0';
+  var v = $('xmode').value === 'V';
+  $('xlabel').textContent = v ? '最終体積 V₂' : '最終圧力 p₂';
+  $('xunit').textContent = v ? 'L' : '×10⁵ Pa';
+  $('xval').placeholder = v ? '例: 50' : '例: 0.5';
+}
+
+/* ---------- results ---------- */
+function dlt(d, a, b){
+  if(Math.abs(d) < 1e-9 * Math.max(Math.abs(a), Math.abs(b), 1e-300)) return '0';
+  return (d > 0 ? '+' : '−') + sig(Math.abs(d));
+}
+function renderChecks(items){
+  $('checks').innerHTML = items.map(function(it){
+    var lab = {ok: 'OK', miss: '不足', warn: '注意', info: '補足'}[it.s];
+    return '<li><span class="pill ' + it.s + '">' + lab + '</span><span>' + it.t + '</span></li>';
+  }).join('');
+}
+function renderResults(){
+  var r = S.res;
+  if(!r){
+    ['U', 'W', 'Q'].forEach(function(k){ $('v' + k).textContent = '—'; $('c' + k).textContent = '入力を確認してください'; });
+    $('law').textContent = ''; $('state').innerHTML = ''; $('eq').innerHTML = '';
+    $('pnote').textContent = NOTES[radio('proc')]; $('live').textContent = '';
+    return;
+  }
+  $('vU').textContent = fJ(r.dU);
+  $('vW').textContent = fJ(r.W);
+  $('vQ').textContent = fJ(r.Q);
+  $('cU').textContent = r.dU > 0 ? '増加（温度が上がる）' : r.dU < 0 ? '減少（温度が下がる）' : '変化なし';
+  $('cW').textContent = r.W > 0 ? '膨張して外部に仕事をした' : r.W < 0 ? '圧縮されて仕事をされた（負の値）' : '仕事なし';
+  $('cQ').textContent = r.Q > 0 ? '熱を吸収した' : r.Q < 0 ? '熱を放出した（負の値）' : '熱の出入りなし';
+  $('law').textContent = '第一法則 Q = ΔU + W :  ' + fJ(r.Q) + ' = ' + fJ(r.dU) + ' + ' + fJ(r.W);
+
+  function row(name, unit, a, b){
+    return '<tr><th scope="row">' + name + '<span>' + unit + '</span></th><td>' + sig(a) + '</td><td class="fin">' + sig(b) + '</td><td>' + dlt(b - a, a, b) + '</td></tr>';
+  }
+  $('state').innerHTML = '<thead><tr><th></th><th>初期 (1)</th><th>最終 (2)</th><th>変化</th></tr></thead><tbody>' +
+    row('圧力 p', '×10⁵ Pa', r.p1 / 1e5, r.p2 / 1e5) +
+    row('体積 V', 'L', r.V1 * 1000, r.V2 * 1000) +
+    row('温度 T', 'K', r.T1, r.T2) +
+    row('温度 t', '°C', r.T1 - 273.15, r.T2 - 273.15) + '</tbody>';
+
+  var dT = r.T2 - r.T1, cvTxt = r.gas === 'mono' ? '(3/2)R' : '(5/2)R';
+  var L = [['C<sub>V</sub>', cvTxt, sig(r.Cv) + ' J/(mol·K)']];
+  var nd = sig(r.n) + ' × ' + sig(r.Cv) + ' × ' + sig(dT);
+  if(r.proc === 'iso-v'){
+    L.push(['V', 'V₂ = V₁ = nRT₁/p₁', sig(r.V1 * 1000) + ' L']);
+    L.push(['p₂', 'p₁T₂/T₁', sig(r.p2 / 1e5) + ' ×10⁵ Pa']);
+    L.push(['ΔU', 'nC<sub>V</sub>(T₂−T₁)', nd + ' = ' + fJ(r.dU)]);
+    L.push(['W', '体積が変わらないので 0', '0 J']);
+    L.push(['Q', 'ΔU に等しい', fJ(r.Q)]);
+  } else if(r.proc === 'iso-p'){
+    L.push(['V₂', 'nRT₂/p', sig(r.V2 * 1000) + ' L']);
+    L.push(['ΔU', 'nC<sub>V</sub>(T₂−T₁)', nd + ' = ' + fJ(r.dU)]);
+    L.push(['W', 'p(V₂−V₁) = nR(T₂−T₁)', sig(r.n) + ' × ' + sig(R) + ' × ' + sig(dT) + ' = ' + fJ(r.W)]);
+    L.push(['Q', 'nC<sub>P</sub>(T₂−T₁)　C<sub>P</sub> = C<sub>V</sub> + R', sig(r.n) + ' × ' + sig(r.Cp) + ' × ' + sig(dT) + ' = ' + fJ(r.Q)]);
+  } else if(r.proc === 'iso-t'){
+    L.push(['p₂', 'p₁V₁ = p₂V₂ （ボイルの法則）', sig(r.p2 / 1e5) + ' ×10⁵ Pa，V₂ = ' + sig(r.V2 * 1000) + ' L']);
+    L.push(['ΔU', '温度が変わらないので 0', '0 J']);
+    L.push(['W', 'nRT ln(V₂/V₁)', sig(r.n) + ' × ' + sig(R) + ' × ' + sig(r.T1) + ' × ln(' + sig(r.V2 / r.V1) + ') = ' + fJ(r.W)]);
+    L.push(['Q', 'ΔU = 0 より W に等しい', fJ(r.Q)]);
+  } else {
+    L.push(['γ', 'C<sub>P</sub>/C<sub>V</sub>', sig(r.g)]);
+    L.push(['V₂', 'V₁(T₁/T₂)<sup>1/(γ−1)</sup>', sig(r.V2 * 1000) + ' L']);
+    L.push(['p₂', 'nRT₂/V₂', sig(r.p2 / 1e5) + ' ×10⁵ Pa']);
+    L.push(['ΔU', 'nC<sub>V</sub>(T₂−T₁)', nd + ' = ' + fJ(r.dU)]);
+    L.push(['Q', '断熱なので 0', '0 J']);
+    L.push(['W', 'Q = ΔU + W より −ΔU', fJ(r.W)]);
+  }
+  $('eq').innerHTML = L.map(function(x){
+    return '<div><dt>' + x[0] + '</dt><dd><span class="f">' + x[1] + '</span><span class="v">' + x[2] + '</span></dd></div>';
+  }).join('');
+  $('pnote').textContent = NOTES[r.proc];
+}
+function updateLive(){
+  if(!S.res){ return; }
+  var c = S.res.at(S.t);
+  $('live').innerHTML = 'p = <b>' + sig(c.p / 1e5) + '</b> ×10⁵ Pa　V = <b>' + sig(c.V * 1000) + '</b> L　T = <b>' + sig(c.T) + '</b> K';
+}
+
+function recompute(replay){
+  var out = solve(readInput());
+  S.res = out.res;
+  renderChecks(out.items);
+  renderResults();
+  if(replay && S.res){
+    S.t = S.reduced ? 1 : 0;
+    S.playing = !S.reduced;
+    $('seek').value = Math.round(S.t * 1000);
+    updBtn();
+  }
+  S.dirty = true;
+}
+function updBtn(){ $('play').textContent = S.playing ? '一時停止' : (S.t >= 1 ? 'もう一度' : '再生'); }
+
+/* ---------- canvas helpers ---------- */
+function colors(){
+  var cs = getComputedStyle(document.documentElement);
+  function g(n){ return cs.getPropertyValue(n).trim(); }
+  return {fg: g('--fg'), muted: g('--muted'), line: g('--line'), panel: g('--panel'), accent: g('--accent'),
+          s2: g('--s2'), hot: g('--hot'), cold: g('--cold'), onBand: g('--on-band')};
+}
+function hex(h){ h = h.replace('#', ''); return [0, 2, 4].map(function(i){ return parseInt(h.substr(i, 2), 16); }); }
+function mix(a, b, k, alpha){
+  var x = hex(a), y = hex(b);
+  var c = x.map(function(v, i){ return Math.round(v + (y[i] - v) * k); });
+  return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + (alpha === undefined ? 1 : alpha) + ')';
+}
+function setup(c, aspect){
+  var w = Math.max(200, c.parentElement.clientWidth), h = Math.round(w * aspect);
+  var dpr = window.devicePixelRatio || 1;
+  if(c._w !== w || c._h !== h || c._d !== dpr){
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    c.style.height = h + 'px'; c._w = w; c._h = h; c._d = dpr;
+  }
+  var ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return {ctx: ctx, w: w, h: h};
+}
+function msg(ctx, w, h, col, text){
+  ctx.fillStyle = col.muted; ctx.font = '13px ' + FB; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, w / 2, h / 2);
+}
+function ticks(lo, hi, n){
+  var raw = (hi - lo) / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  var st = (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p, a = [];
+  for(var v = Math.ceil(lo / st - 1e-9) * st; v <= hi + 1e-9; v += st) a.push(+v.toPrecision(12));
+  return {a: a, st: st};
+}
+function rng(vals, zero){
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  if(hi - lo < 1e-9 * Math.abs(hi)){ lo = hi * 0.7; hi = hi * 1.3; }
+  var pad = (hi - lo) * 0.12;
+  lo -= pad; hi += pad;
+  if(zero || lo < 0) lo = 0;
+  return [lo, hi];
+}
+
+function drawChart(c, kind){
+  var s = setup(c, 0.78), ctx = s.ctx, w = s.w, h = s.h, col = colors(), r = S.res;
+  if(!r){ msg(ctx, w, h, col, '入力を確認してください'); return; }
+  var xs = kind === 'pv' ? r.pts.V : r.pts.T, ys = kind === 'pv' ? r.pts.p : r.pts.V;
+  function xy(pt){ return kind === 'pv' ? [pt.V * 1000, pt.p / 1e5] : [pt.T, pt.V * 1000]; }
+  var color = kind === 'pv' ? col.accent : col.s2;
+  var m = {l: 52, r: 16, t: 26, b: 36}, pw = w - m.l - m.r, ph = h - m.t - m.b;
+  var xr = rng(xs, false), yr = rng(ys, kind === 'pv');
+  var x0 = xr[0], x1 = xr[1], y0 = yr[0], y1 = yr[1];
+  function X(v){ return m.l + (v - x0) / (x1 - x0) * pw; }
+  function Y(v){ return m.t + ph - (v - y0) / (y1 - y0) * ph; }
+  var tx = ticks(x0, x1, 5), ty = ticks(y0, y1, 5);
+  var dx = Math.max(0, -Math.floor(Math.log10(tx.st) + 1e-9)), dy = Math.max(0, -Math.floor(Math.log10(ty.st) + 1e-9));
+
+  ctx.lineWidth = 1; ctx.font = '11px ' + FM; ctx.fillStyle = col.muted;
+  ctx.strokeStyle = col.line;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  tx.a.forEach(function(v){
+    ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(X(v), m.t); ctx.lineTo(X(v), m.t + ph); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.fillText(v.toFixed(dx), X(v), m.t + ph + 6);
+  });
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ty.a.forEach(function(v){
+    ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(m.l, Y(v)); ctx.lineTo(m.l + pw, Y(v)); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.fillText(v.toFixed(dy), m.l - 6, Y(v));
+  });
+  ctx.strokeStyle = col.muted; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(m.l, m.t); ctx.lineTo(m.l, m.t + ph); ctx.lineTo(m.l + pw, m.t + ph); ctx.stroke();
+  ctx.fillStyle = col.fg; ctx.font = '12px ' + FM;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(kind === 'pv' ? 'p (×10⁵ Pa)' : 'V (L)', m.l, m.t - 10);
+  ctx.textAlign = 'right';
+  ctx.fillText(kind === 'pv' ? 'V (L)' : 'T (K)', m.l + pw, h - 4);
+
+  var isoLabels = [];
+  ctx.save();
+  ctx.beginPath(); ctx.rect(m.l, m.t, pw, ph); ctx.clip();
+  if(kind === 'pv'){
+    if(Math.abs(r.W) > 0){
+      ctx.globalAlpha = 0.16; ctx.fillStyle = color; ctx.beginPath();
+      for(var k = 0; k < xs.length; k++){ k === 0 ? ctx.moveTo(X(xs[k]), Y(ys[k])) : ctx.lineTo(X(xs[k]), Y(ys[k])); }
+      ctx.lineTo(X(xs[xs.length - 1]), Y(0)); ctx.lineTo(X(xs[0]), Y(0)); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    var Ts = [r.T1]; if(Math.abs(r.T2 - r.T1) > 1e-6) Ts.push(r.T2);
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = col.muted; ctx.lineWidth = 1;
+    Ts.forEach(function(T, idx){
+      ctx.beginPath(); var last = null, first = true;
+      for(var j = 1; j <= 90; j++){
+        var V = x0 + (x1 - x0) * j / 90, p = r.n * R * T / (V / 1000) / 1e5;
+        ctx.globalAlpha = 0.8;
+        first ? ctx.moveTo(X(V), Y(p)) : ctx.lineTo(X(V), Y(p)); first = false;
+        if(p >= y0 && p <= y1) last = [V, p];
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+      if(last) isoLabels.push({x: X(last[0]), y: Y(last[1]), t: Ts.length === 1 ? '等温線' : (idx === 0 ? 'T₁' : 'T₂')});
+    });
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = color; ctx.lineWidth = 2.6; ctx.lineJoin = 'round'; ctx.beginPath();
+  for(var i = 0; i < xs.length; i++){ i === 0 ? ctx.moveTo(X(xs[i]), Y(ys[i])) : ctx.lineTo(X(xs[i]), Y(ys[i])); }
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.font = '11px ' + FM; ctx.fillStyle = col.muted; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  isoLabels.forEach(function(L){ ctx.fillText(L.t, Math.min(L.x, m.l + pw - 2) - 4, Math.max(L.y - 4, m.t + 12)); });
+  if(kind === 'pv' && Math.abs(r.W) > 0){
+    var mid = Math.floor(xs.length / 2), my = Math.max(Y(0) - 14, Y(ys[mid]) + 18);
+    ctx.fillStyle = color; ctx.font = '12px ' + FB; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    if(my < m.t + ph - 4) ctx.fillText('面積 = |W|', X(xs[mid]), Math.min(my, m.t + ph - 8));
+  }
+
+  var a = xy(r.at(0.46)), b = xy(r.at(0.54)), xa = X(a[0]), xb = X(b[0]);
+  var ya = Y(a[1]), yb = Y(b[1]);
+  if(Math.hypot(xb - xa, yb - ya) > 1.5){
+    var th = Math.atan2(yb - ya, xb - xa), cx = (xa + xb) / 2, cy = (ya + yb) / 2;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(th); ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-5, 5); ctx.lineTo(-5, -5); ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  var P0 = {x: X(xs[0]), y: Y(ys[0])}, P1 = {x: X(xs[xs.length - 1]), y: Y(ys[ys.length - 1])};
+  ctx.setLineDash([3, 3]); ctx.strokeStyle = col.muted; ctx.lineWidth = 1; ctx.globalAlpha = 0.7;
+  [P0, P1].forEach(function(P){
+    ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(P.x, m.t + ph); ctx.moveTo(P.x, P.y); ctx.lineTo(m.l, P.y); ctx.stroke();
+  });
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+
+  var same = Math.hypot(P0.x - P1.x, P0.y - P1.y) < 8;
+  function mark(P, filled, label){
+    ctx.beginPath(); ctx.arc(P.x, P.y, 5.5, 0, 6.2832);
+    ctx.fillStyle = filled ? color : col.panel; ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = col.fg; ctx.font = '700 12px ' + FM; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    var lx = Math.min(P.x + 8, m.l + pw - 18), ly = Math.max(P.y - 6, m.t + 12);
+    ctx.fillText(label, lx, ly);
+  }
+  if(same){ mark(P1, false, '1 = 2'); }
+  else { mark(P0, false, '1'); mark(P1, true, '2'); }
+
+  var cur = xy(r.at(S.t)), cxp = X(cur[0]), cyp = Y(cur[1]);
+  ctx.beginPath(); ctx.arc(cxp, cyp, 3.6, 0, 6.2832); ctx.fillStyle = col.fg; ctx.fill();
+  ctx.strokeStyle = col.panel; ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+function arrow(ctx, x, y1, y2, color){
+  var dir = y2 > y1 ? 1 : -1;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x, y2 - dir * 5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y2); ctx.lineTo(x - 5, y2 - dir * 8); ctx.lineTo(x + 5, y2 - dir * 8); ctx.closePath(); ctx.fill();
+}
+function hatch(ctx, col, x, y, w, h){
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  ctx.strokeStyle = col.muted; ctx.lineWidth = 1; ctx.globalAlpha = 0.7;
+  for(var d = -h; d < w; d += 6){ ctx.beginPath(); ctx.moveTo(x + d, y + h); ctx.lineTo(x + d + h, y); ctx.stroke(); }
+  ctx.restore();
+  ctx.strokeStyle = col.muted; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+}
+
+function drawPiston(){
+  var s = setup($('cvP'), 0.95), ctx = s.ctx, w = s.w, h = s.h, col = colors(), r = S.res;
+  if(!r){ msg(ctx, w, h, col, '入力を確認してください'); return; }
+  var cur = r.at(S.t);
+  var xL = w * 0.26, xR = w * 0.64, xc = (xL + xR) / 2, yTop = h * 0.07, yBot = h * 0.74, Hc = yBot - yTop;
+  var Vm = r.Vmax * 1.12;
+  function Y(V){ return yBot - Hc * V / Vm; }
+  var yP = Y(cur.V);
+  var k = r.Thi > r.Tlo ? (cur.T - r.Tlo) / (r.Thi - r.Tlo) : 0.5;
+
+  // 外側: 熱源・断熱材
+  var by = yBot + 8, bh = 26, bx = xL - 12, bw = xR - xL + 24;
+  ctx.font = '700 12px ' + FB; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if(r.proc === 'adi'){
+    hatch(ctx, col, bx, by, bw, bh);
+    hatch(ctx, col, xL - 12, yTop, 10, yBot - yTop + 8);
+    hatch(ctx, col, xR + 2, yTop, 10, yBot - yTop + 8);
+    ctx.fillStyle = col.muted; ctx.font = '12px ' + FB; ctx.fillText('断熱材（Q = 0）', xc, by + bh + 14);
+  } else {
+    var label, fill, txt = col.onBand;
+    if(r.proc === 'iso-t'){ fill = col.line; txt = col.fg; label = '恒温槽  T = ' + sig(r.T1) + ' K'; }
+    else if(r.Q >= 0){ fill = col.hot; label = '加熱'; }
+    else { fill = col.cold; label = '冷却'; }
+    ctx.fillStyle = fill; ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = txt; ctx.fillText(label, xc, by + bh / 2 + 1);
+    if(r.Q !== 0){
+      var cA = r.Q > 0 ? col.hot : col.cold;
+      [xL + (xR - xL) * 0.25, xL + (xR - xL) * 0.75].forEach(function(ax){
+        r.Q > 0 ? arrow(ctx, ax, by - 1, yBot - 22, cA) : arrow(ctx, ax, yBot - 22, by - 1, cA);
+      });
+    }
+  }
+
+  // 気体
+  var gc = mix(col.cold, col.hot, k, 0.34), gs = mix(col.cold, col.hot, k, 0.95);
+  ctx.fillStyle = gc; ctx.fillRect(xL, yP, xR - xL, yBot - yP);
+  ctx.fillStyle = gs;
+  var gh = yBot - yP;
+  S.parts.forEach(function(p){
+    var px = xL + 7 + p.x * (xR - xL - 14), py = yP + 12 + p.y * Math.max(2, gh - 18);
+    ctx.beginPath(); ctx.arc(px, py, 2.6, 0, 6.2832); ctx.fill();
+  });
+
+  // 容器・ピストン
+  ctx.strokeStyle = col.fg; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(xL, yTop); ctx.lineTo(xL, yBot); ctx.lineTo(xR, yBot); ctx.lineTo(xR, yTop); ctx.stroke();
+  ctx.fillStyle = col.fg; ctx.fillRect(xL + 2, yP - 9, xR - xL - 4, 9);
+  if(r.proc === 'iso-p'){
+    var ww = (xR - xL) * 0.5;
+    ctx.fillRect(xc - ww / 2, yP - 9 - 18, ww, 18);
+    ctx.fillStyle = col.panel; ctx.font = '11px ' + FB; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('おもり', xc, yP - 9 - 9);
+  } else {
+    ctx.strokeStyle = col.fg; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(xc, yP - 9); ctx.lineTo(xc, 6); ctx.moveTo(xc - 14, 6); ctx.lineTo(xc + 14, 6); ctx.stroke();
+  }
+  if(r.proc === 'iso-v'){
+    ctx.fillStyle = col.fg;
+    ctx.fillRect(xL - 10, yP - 14, 10, 6); ctx.fillRect(xR, yP - 14, 10, 6);
+  }
+
+  // 体積の目盛り
+  var y1 = Y(r.V1), y2 = Y(r.V2);
+  ctx.font = '11px ' + FM; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.strokeStyle = col.muted; ctx.fillStyle = col.muted; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+  function ref(y, text){
+    ctx.beginPath(); ctx.moveTo(xL, y); ctx.lineTo(xR + 18, y); ctx.stroke();
+    ctx.fillText(text, xR + 22, y);
+  }
+  if(Math.abs(y1 - y2) < 14){ ref(y1, 'V₁ = V₂'); ctx.fillText(sig(r.V1 * 1000) + ' L', xR + 22, y1 + 13); }
+  else { ref(y1, 'V₁ ' + sig(r.V1 * 1000) + ' L'); ref(y2, 'V₂ ' + sig(r.V2 * 1000) + ' L'); }
+  ctx.setLineDash([]);
+}
+
+/* ---------- loop ---------- */
+var last = performance.now();
+function frame(ts){
+  var dt = Math.min(50, ts - last); last = ts;
+  if(S.playing){
+    S.t = Math.min(1, S.t + dt / 4800);
+    $('seek').value = Math.round(S.t * 1000);
+    if(S.t >= 1){ S.playing = false; updBtn(); }
+    S.dirty = true;
+  }
+  if(S.res && !S.reduced){
+    var sp = 0.00055 * Math.sqrt(S.res.at(S.t).T / 300) * dt;
+    S.parts.forEach(function(p){
+      p.x += p.vx * sp; p.y += p.vy * sp;
+      if(p.x < 0){ p.x = -p.x; p.vx = -p.vx; } else if(p.x > 1){ p.x = 2 - p.x; p.vx = -p.vx; }
+      if(p.y < 0){ p.y = -p.y; p.vy = -p.vy; } else if(p.y > 1){ p.y = 2 - p.y; p.vy = -p.vy; }
+    });
+  }
+  if(S.dirty){ drawChart($('cvPV'), 'pv'); drawChart($('cvTV'), 'tv'); updateLive(); }
+  if(S.dirty || !S.reduced){ drawPiston(); }
+  S.dirty = false;
+  requestAnimationFrame(frame);
+}
+
+/* ---------- events ---------- */
+var form = $('f');
+form.addEventListener('submit', function(e){ e.preventDefault(); syncUI(); recompute(true); });
+form.addEventListener('input', function(e){
+  if(e.target.id === 'T2'){ S.lastT2 = e.target.value; }
+  if(e.target.id === 'T1' && radio('proc') === 'iso-t'){ $('T2').value = e.target.value; }
+  recompute(false);
+});
+form.addEventListener('change', function(e){
+  var id = e.target.id;
+  if(id === 'unit'){
+    var toC = e.target.value === 'C', f = function(v){ return v === '' || isNaN(Number(v)) ? v : String(+(toC ? Number(v) - 273.15 : Number(v) + 273.15).toFixed(2)); };
+    $('T1').value = f($('T1').value); S.lastT2 = f(S.lastT2); $('T2').value = f($('T2').value);
+    Array.prototype.forEach.call(document.querySelectorAll('.uT'), function(el){ el.textContent = toC ? '°C' : 'K'; });
+    syncUI(); recompute(false); return;
+  }
+  syncUI();
+  if(e.target.name === 'proc' || e.target.name === 'gas' || id === 'xmode' || id === 'n' || id === 'p1' || id === 'T1' || id === 'T2' || id === 'xval'){ recompute(true); }
+});
+$('play').addEventListener('click', function(){
+  if(!S.res) return;
+  if(S.playing){ S.playing = false; }
+  else { if(S.t >= 1) S.t = 0; S.playing = true; }
+  updBtn(); S.dirty = true;
+});
+$('seek').addEventListener('input', function(e){
+  S.t = Number(e.target.value) / 1000; S.playing = false; updBtn(); S.dirty = true;
+});
+if(window.ResizeObserver){
+  var ro = new ResizeObserver(function(){ S.dirty = true; });
+  Array.prototype.forEach.call(document.querySelectorAll('.fig'), function(el){ ro.observe(el); });
+} else { window.addEventListener('resize', function(){ S.dirty = true; }); }
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ S.dirty = true; });
+new MutationObserver(function(){ S.dirty = true; }).observe(document.documentElement, {attributes: true});
+
+syncUI();
+recompute(false);
+updBtn();
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
